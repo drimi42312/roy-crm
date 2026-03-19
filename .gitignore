@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.log
+clicks.json
+tracking.json
+draft.txt

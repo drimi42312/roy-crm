@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roy - WhatsApp Assistant</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- QR Screen -->
+<div id="qr-screen" class="screen active">
+  <div class="qr-container">
+    <div class="roy-logo">🤖</div>
+    <h1>Roy</h1>
+    <p class="subtitle">Your WhatsApp AI Assistant</p>
+    <div id="qr-status">
+      <div class="spinner"></div>
+      <p id="qr-status-text">Starting up... please wait</p>
+    </div>
+    <div id="qr-image-wrap" style="display:none">
+      <p>Scan with WhatsApp to connect</p>
+      <img id="qr-image" src="" alt="QR Code">
+      <p class="hint">WhatsApp → ⋮ → Linked Devices → Link a Device</p>
+    </div>
+  </div>
+</div>
+
+<!-- Main App Screen -->
+<div id="app-screen" class="screen">
+  <div class="app-layout">
+
+    <!-- Sidebar: Chat List -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="header-left">
+          <div class="avatar roy-avatar">🤖</div>
+          <span class="app-title">Roy Assistant</span>
+        </div>
+        <div class="connection-dot connected" id="connection-dot"></div>
+      </div>
+
+      <div class="search-bar">
+        <input type="text" id="search-input" placeholder="Search chats..." oninput="filterChats(this.value)">
+      </div>
+
+      <div id="chat-list" class="chat-list">
+        <div class="empty-state">
+          <div class="spinner"></div>
+          <p>Loading chats...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main: Message Area -->
+    <div class="main-area">
+      <!-- Placeholder when no chat selected -->
+      <div id="no-chat" class="no-chat-selected">
+        <div class="no-chat-inner">
+          <div style="font-size: 64px;">🤖</div>
+          <h2>Welcome to Roy</h2>
+          <p>Select a chat to start. Roy will suggest replies automatically.</p>
+        </div>
+      </div>
+
+      <!-- Active Chat -->
+      <div id="chat-view" style="display:none; flex-direction:column; height:100%;">
+
+        <!-- Chat header -->
+        <div class="chat-header">
+          <div class="avatar" id="chat-avatar">?</div>
+          <div class="chat-header-info">
+            <div class="chat-name" id="chat-name">Chat Name</div>
+            <div class="chat-status" id="chat-status">online</div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="messages" class="messages-area"></div>
+
+        <!-- Roy suggestion box -->
+        <div id="roy-box" class="roy-suggestion-box" style="display:none">
+          <div class="roy-box-header">
+            <span class="roy-icon">🤖</span>
+            <span>Roy suggests:</span>
+            <div id="roy-loading" class="roy-spinner" style="display:none"></div>
+          </div>
+          <div id="suggestion-text" class="suggestion-text" contenteditable="true" spellcheck="true"></div>
+          <div class="roy-actions">
+            <button class="btn-send-suggestion" onclick="sendSuggestion()">Send</button>
+            <button class="btn-dismiss" onclick="dismissSuggestion()">Dismiss</button>
+            <button class="btn-refresh" onclick="refreshSuggestion()">↻ New suggestion</button>
+          </div>
+        </div>
+
+        <!-- Input area -->
+        <div class="input-area">
+          <input type="text" id="message-input" placeholder="Type a message..." onkeydown="handleKey(event)">
+          <button class="send-btn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path fill="currentColor" d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
