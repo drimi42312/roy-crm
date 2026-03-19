@@ -7,6 +7,7 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const https = require('https');
 const qrcode = require('qrcode');
 const Roy = require('./roy');
+const NotionLogger = require('./notion-logger');
 
 const app = express();
 const server = http.createServer(app);
@@ -68,54 +69,6 @@ function notionPatch(pageId, properties) {
   req.end();
 }
 
-function notionQuery(dbId, body) {
-  return new Promise((resolve) => {
-    const data = JSON.stringify(body || {});
-    const req = https.request({
-      hostname: 'api.notion.com',
-      path: `/v1/databases/${dbId}/query`,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
-        'Notion-Version': '2022-06-28',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    }, (res) => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
-    });
-    req.on('error', () => resolve({}));
-    req.write(data);
-    req.end();
-  });
-}
-
-function notionAppend(pageId, children) {
-  const data = JSON.stringify({ children });
-  const req = https.request({
-    hostname: 'api.notion.com',
-    path: `/v1/blocks/${pageId}/children`,
-    method: 'PATCH',
-    headers: {
-      'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
-      'Notion-Version': '2022-06-28',
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(data),
-    },
-  }, (res) => {
-    if (res.statusCode >= 400) {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => console.error('[notion] append error:', res.statusCode, raw.slice(0, 200)));
-    }
-  });
-  req.on('error', e => console.error('[notion] append error:', e.message));
-  req.write(data);
-  req.end();
-}
-
 async function recordClickInNotion(shortId, totalClicks) {
   if (!process.env.NOTION_TOKEN) return;
 
@@ -145,68 +98,6 @@ async function recordClickInNotion(shortId, totalClicks) {
 
   console.log(`[track] ${shortId} → click #${totalClicks}, Notion updated`);
 }
-
-// ── Lead cache & conversation logging ─────────────────────────────────────────
-
-function normalizePhone(raw) {
-  if (!raw && raw !== 0) return null;
-  let s = String(raw).replace(/[\s\-\(\)\.]/g, '');
-  s = s.replace(/^\+/, '');
-  if (s.startsWith('00')) s = s.slice(2);
-  if (s.startsWith('0'))  s = '972' + s.slice(1);
-  if (!/^\d{10,15}$/.test(s)) return null;
-  return s;
-}
-
-let leadCache = new Map(); // normalizedPhone → notionPageId
-
-async function buildLeadCache() {
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_LEADS_DB_ID) return;
-  const map = new Map();
-  let cursor;
-  try {
-    do {
-      const body = cursor ? { start_cursor: cursor } : {};
-      const res = await notionQuery(process.env.NOTION_LEADS_DB_ID, body);
-      for (const page of (res.results || [])) {
-        const rawPhone = page.properties?.['טלפון']?.number;
-        const phone = normalizePhone(rawPhone);
-        if (phone) map.set(phone, page.id);
-      }
-      cursor = res.has_more ? res.next_cursor : null;
-    } while (cursor);
-    leadCache = map;
-    console.log(`[leads] Cache built: ${map.size} leads with phone numbers`);
-  } catch (e) {
-    console.error('[leads] Failed to build cache:', e.message);
-  }
-}
-
-function findNotionLead(chatId) {
-  const phone = chatId.replace('@c.us', '');
-  if (leadCache.has(phone)) return leadCache.get(phone);
-  const norm = normalizePhone(phone);
-  if (norm && leadCache.has(norm)) return leadCache.get(norm);
-  return null;
-}
-
-function logConversationToNotion(notionPageId, direction, senderName, text) {
-  if (!notionPageId || !text) return;
-  const ts = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem', hour12: false }).replace(',', '');
-  const icon  = direction === 'in' ? '💬' : '📤';
-  const label = direction === 'in' ? senderName : 'רוי';
-  notionAppend(notionPageId, [{
-    object: 'block',
-    type: 'callout',
-    callout: {
-      rich_text: [{ type: 'text', text: { content: `${label} — ${ts}:\n${text}` } }],
-      icon: { emoji: icon },
-      color: direction === 'in' ? 'gray_background' : 'blue_background',
-    },
-  }]);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 app.get('/t/:shortId', (req, res) => {
   const dest = process.env.DESTINATION_URL || 'https://77kedem.com/offer.html';
@@ -352,8 +243,8 @@ client.on('ready', async () => {
   io.emit('ready', { message: 'WhatsApp connected!' });
 
   // Build lead cache and refresh every 10 minutes
-  buildLeadCache();
-  setInterval(buildLeadCache, 10 * 60 * 1000);
+  NotionLogger.buildLeadCache();
+  setInterval(NotionLogger.buildLeadCache, 10 * 60 * 1000);
 
   // Detect page reloads (WhatsApp Web auto-updates) — reinit when page navigates
   client.pupPage.once('load', () => {
@@ -431,11 +322,8 @@ client.on('message', async (msg) => {
 
   // Log to Notion CRM if this is a known lead
   if (!msg.fromMe && !chat.isGroup) {
-    const notionLeadId = findNotionLead(chatId);
-    if (notionLeadId) {
-      const senderName = contact?.pushname || contact?.number || chatId.replace('@c.us', '');
-      logConversationToNotion(notionLeadId, 'in', senderName, msg.body || '');
-    }
+    const senderName = contact?.pushname || contact?.number || chatId.replace('@c.us', '');
+    NotionLogger.logConversation(chatId, 'in', senderName, msg.body || '');
   }
 
   // Forward to external webhook if configured
@@ -636,8 +524,7 @@ io.on('connection', (socket) => {
       io.emit('chat_updated', chats[chatId]);
 
       // Log to Notion CRM if this is a known lead
-      const notionLeadId = findNotionLead(chatId);
-      if (notionLeadId) logConversationToNotion(notionLeadId, 'out', 'רוי', text);
+      NotionLogger.logConversation(chatId, 'out', 'רוי', text);
     } catch (err) {
       console.error('Send error:', err);
       socket.emit('send_error', { error: 'Failed to send message.' });
